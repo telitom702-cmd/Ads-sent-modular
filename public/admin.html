@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shortener Admin</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f5f7fb;color:#172033;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}.card{background:#fff;border:1px solid #e7eaf0;border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:0 4px 18px rgba(20,30,50,.04)}
+h1,h2{margin-top:0}.muted{color:#697386}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}input{width:100%;padding:12px;border:1px solid #d9dee8;border-radius:9px;margin:6px 0 10px}
+button{border:0;border-radius:8px;padding:9px 12px;background:#1a6dff;color:#fff;cursor:pointer;margin:3px}
+button.danger{background:#d92d20}button.secondary{background:#eef2f7;color:#172033}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.item{border:1px solid #e7eaf0;border-radius:10px;padding:12px;margin:10px 0;overflow-wrap:anywhere}
+code{background:#f0f3f8;padding:3px 6px;border-radius:6px}.top{display:flex;justify-content:space-between;gap:10px;align-items:center}
+#app{display:none}.msg{padding:10px;border-radius:8px;margin:8px 0}.ok{background:#e9f9ef}.err{background:#fff0ef}
+.stat{font-size:13px;color:#697386}.search{max-width:360px}.empty{padding:16px;text-align:center;color:#697386}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div id="login" class="card" style="max-width:420px;margin:60px auto">
+<h1>Shortener Admin</h1>
+<p class="muted">Admin login</p>
+<input id="user" placeholder="Username" autocomplete="username">
+<input id="pass" type="password" placeholder="Password" autocomplete="current-password">
+<button onclick="login()">Login</button>
+<div id="loginMsg"></div>
+</div>
+
+<div id="app">
+<div class="top card">
+<div><h1>Shortener Admin</h1><div class="muted">API keys and short URLs</div></div>
+<button class="secondary" onclick="logout()">Logout</button>
+</div>
+
+<div class="grid">
+<section class="card">
+<h2>API Keys</h2>
+<button onclick="createKey()">+ Create API Key</button>
+<input class="search" id="keySearch" oninput="renderKeys()" placeholder="Search API key">
+<div id="keys"></div>
+</section>
+
+<section class="card">
+<h2>Short URLs</h2>
+<input id="newUrl" placeholder="Original URL (https://...)">
+<input id="newAlias" placeholder="Custom name (optional, 4-32 letters/numbers)">
+<button onclick="createLink()">+ Create Short URL</button>
+<input class="search" id="linkSearch" oninput="renderLinks()" placeholder="Search URL / code">
+<div id="links"></div>
+</section>
+</div>
+
+<div id="msg"></div>
+</div>
+</div>
+
+<script>
+let token = localStorage.getItem("shortener_admin_token") || "";
+let data = {apiKeys:[],links:[]};
+
+function esc(s){return String(s ?? "").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m]));}
+function copyText(v){
+  navigator.clipboard.writeText(v).then(()=>toast("Copied")).catch(()=>{
+    const t=document.createElement("textarea");t.value=v;document.body.appendChild(t);t.select();document.execCommand("copy");t.remove();toast("Copied");
+  });
+}
+function toast(msg,error=false){
+  const el=document.getElementById("msg");el.className="msg "+(error?"err":"ok");el.textContent=msg;
+  setTimeout(()=>el.textContent="",2500);
+}
+function showApp(){document.getElementById("login").style.display="none";document.getElementById("app").style.display="block";load();}
+function showLogin(){document.getElementById("login").style.display="block";document.getElementById("app").style.display="none";}
+
+async function login(){
+  const username=document.getElementById("user").value;
+  const password=document.getElementById("pass").value;
+  let r,j;
+  try{
+    r=await fetch("/api/admin?action=login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+    j=await r.json();
+  }catch(e){document.getElementById("loginMsg").textContent="Server error. Try again.";return;}
+  if(!r.ok){document.getElementById("loginMsg").textContent=j.message||"Login failed";return;}
+  token=j.token;localStorage.setItem("shortener_admin_token",token);showApp();
+}
+function logout(){localStorage.removeItem("shortener_admin_token");token="";showLogin();}
+
+async function api(url,opts={}){
+  opts.headers=Object.assign({"Content-Type":"application/json","Authorization":"Bearer "+token},opts.headers||{});
+  const r=await fetch(url,opts);
+  const j=await r.json().catch(()=>({ok:false,message:"Invalid response"}));
+  if(r.status===401){logout();throw new Error("Unauthorized");}
+  if(!r.ok)throw new Error(j.message||"Request failed");
+  return j;
+}
+async function load(){
+  try{data=await api("/api/admin?action=list");renderKeys();renderLinks();}
+  catch(e){toast(e.message,true);}
+}
+async function createKey(){
+  try{
+    const j=await api("/api/admin?action=create-key",{method:"POST"});
+    await load();
+    copyText(j.key);
+    toast("API key created and copied");
+  }catch(e){toast(e.message,true);}
+}
+async function createLink(){
+  const url=document.getElementById("newUrl").value.trim();
+  const alias=document.getElementById("newAlias").value.trim();
+  if(!url){toast("Enter the original URL",true);return;}
+  try{
+    const j=await api("/api/admin?action=create-link",{method:"POST",body:JSON.stringify({url,alias})});
+    document.getElementById("newUrl").value="";
+    document.getElementById("newAlias").value="";
+    await load();
+    copyText(j.shortenedUrl);
+    toast("Short URL created and copied");
+  }catch(e){toast(e.message,true);}
+}
+async function deleteKey(id){
+  if(!confirm("Delete this API key? Its links will also be deleted."))return;
+  try{await api("/api/admin?action=delete-key&id="+encodeURIComponent(id),{method:"DELETE"});await load();toast("API key deleted");}
+  catch(e){toast(e.message,true);}
+}
+async function deleteLink(id){
+  if(!confirm("Delete this short URL?"))return;
+  try{await api("/api/admin?action=delete-link&id="+encodeURIComponent(id),{method:"DELETE"});await load();toast("Short URL deleted");}
+  catch(e){toast(e.message,true);}
+}
+function renderKeys(){
+  const q=(document.getElementById("keySearch").value||"").toLowerCase();
+  const arr=data.apiKeys.filter(x=>x.key.toLowerCase().includes(q));
+  const el=document.getElementById("keys");
+  if(!arr.length){el.innerHTML='<div class="empty">No API keys</div>';return;}
+  el.innerHTML=arr.map(x=>`
+  <div class="item">
+    <div><strong>API Key</strong></div>
+    <div><code>${esc(x.key)}</code></div>
+    <div class="stat">Usage: ${x.usageCount||0} &nbsp; Created: ${new Date(x.createdAt).toLocaleString()}</div>
+    <div class="row">
+      <button data-act="copy" data-value="${esc(x.key)}">Copy Key</button>
+      <button class="danger" data-act="del-key" data-id="${esc(x.id)}">Delete</button>
+    </div>
+  </div>`).join("");
+}
+function renderLinks(){
+  const q=(document.getElementById("linkSearch").value||"").toLowerCase();
+  const arr=data.links.filter(x=>
+    String(x.originalUrl).toLowerCase().includes(q) ||
+    String(x.shortCode).toLowerCase().includes(q) ||
+    String(x.shortenedUrl).toLowerCase().includes(q)
+  );
+  const el=document.getElementById("links");
+  if(!arr.length){el.innerHTML='<div class="empty">No short URLs</div>';return;}
+  el.innerHTML=arr.map(x=>`
+  <div class="item">
+    <div><strong>Original URL</strong></div>
+    <div>${esc(x.originalUrl)}</div>
+    <div style="margin-top:8px"><strong>Short URL</strong></div>
+    <div><code>${esc(x.shortenedUrl)}</code></div>
+    <div class="stat">
+      Code: ${esc(x.shortCode)} &nbsp; Clicks: ${x.clicks||0}
+      &nbsp; Created: ${new Date(x.createdAt).toLocaleString()}
+    </div>
+    <div class="row">
+      <button data-act="copy" data-value="${esc(x.shortenedUrl)}">Copy Short URL</button>
+      <button class="secondary" data-act="copy" data-value="${esc(x.originalUrl)}">Copy Original</button>
+      <button class="danger" data-act="del-link" data-id="${esc(x.id)}">Delete</button>
+    </div>
+  </div>`).join("");
+}
+
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button[data-act]");
+  if(!b)return;
+  const act=b.dataset.act;
+  if(act==="copy")copyText(b.dataset.value);
+  else if(act==="del-key")deleteKey(b.dataset.id);
+  else if(act==="del-link")deleteLink(b.dataset.id);
+});
+document.getElementById("pass").addEventListener("keydown",e=>{if(e.key==="Enter")login();});
+if(token) showApp(); else showLogin();
+</script>
+<script src="/admin-modules.js"></script>
+</body>
+</html>
