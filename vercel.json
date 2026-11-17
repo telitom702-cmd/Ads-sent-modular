@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/*.js": { "includeFiles": "modules/**" }
+  },
+  "rewrites": [
+    { "source": "/admin", "destination": "/admin.html" },
+    { "source": "/:code([A-Za-z0-9]{4,32})", "destination": "/api/go?code=:code" }
+  ]
+}
